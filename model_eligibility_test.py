@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from os import listdir
 from os.path import join
+import tf_keras
 from tensorflow.keras.applications.resnet50 import preprocess_input
 
 
@@ -41,6 +42,7 @@ def load_image(image_fname):
     img_array = np.expand_dims(img_array, axis=0)  # 形状 (1,224,224,3)
     # 4) 调用 ResNet50 的预处理
     img_array = preprocess_input(img_array)
+    # img_array = img_array / 255.0  # 归一化到[0,1]范围
     return img_array
 
 
@@ -48,7 +50,7 @@ def load_image(image_fname):
 # Test main
 def main():
     print("Loading model from ", MODEL_NAME)
-    model = load_model(MODEL_NAME)
+    model = tf_keras.models.load_model(MODEL_NAME)
     print("Done")
 
     print("Now classifying files in ", SAMPLE_PATH)

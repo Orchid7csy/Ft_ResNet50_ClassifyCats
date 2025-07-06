@@ -1,5 +1,5 @@
-# receive.py (更健壮的版本)
-
+import tensorflow as tf
+import tf_keras
 import paho.mqtt.client as mqtt
 from tensorflow.keras.models import load_model
 import numpy as np
@@ -7,9 +7,10 @@ import json
 import cv2
 import queue # <-- 引入队列模块
 import threading # <-- 引入线程模块
+import time
 
 # (请确保 find_real_img.py 在同一目录下)
-from find_real_img import detect_a4_and_extract, find_cat_photo, preprocess_for_cnn, classes
+from find_real_img import preprocess_for_cnn, classes, find_cat_with_haar
 
 # --- 全局常量 ---
 FILENAME = "cats.keras"
@@ -19,7 +20,7 @@ task_queue = queue.Queue() # <-- 创建一个线程安全的任务队列
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Connected successfully with result code", rc)
-        client.subscribe("Group2/IMAGE/classify")
+        client.subscribe("Group2/IMAGE/classify_request")
     else:
         print("Connection failed with result code", rc)
 
@@ -41,9 +42,21 @@ def on_message(client, userdata, msg):
     """
     print(f"Received message for topic {msg.topic}, adding to queue.")
     try:
-        recv = json.loads(msg.payload)
-        frame = np.array(recv['data'], dtype=np.uint8)
-        filename = recv['filename']
+        # 直接处理二进制数据
+        image_data = msg.payload
+        
+        # 将二进制数据转换为numpy数组
+        nparr = np.frombuffer(image_data, np.uint8)
+        
+        # 使用OpenCV解码图像
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            print("Failed to decode image")
+            return
+            
+        # 生成文件名（或从topic中提取）
+        filename = f"received_image_{int(time.time())}.jpg"
         
         # 将耗时任务所需的数据放入队列
         task_queue.put((filename, frame))
@@ -62,32 +75,92 @@ def worker(client):
             filename, frame = task_queue.get()
             print(f"Worker processing task for: {filename}")
 
+            # --- 使用Haar检测猫脸的新逻辑 ---
+            print(f"Starting Haar cascade cat detection for {filename}")
+            
+            # 1) 首先尝试使用Haar检测猫脸
+            try:
+                cat_faces = find_cat_with_haar(frame)
+                
+                # 检查返回值是否有效
+                if cat_faces is not None and len(cat_faces) > 0:
+                    # 检测到猫脸，使用第一个检测到的猫脸区域
+                    print(f"Haar detection successful for {filename}, found {len(cat_faces)} cat face(s)")
+                    x, y, w, h = cat_faces[0]  # 使用第一个检测到的猫脸
+                    cat_face_roi = frame[y:y+h, x:x+w]  # 提取猫脸区域
+                    classification_image = cat_face_roi
+                    print(f"Using detected cat face region: x={x}, y={y}, w={w}, h={h}")
+                else:
+                    # 没有检测到猫脸，使用原图
+                    print(f"No cat face detected with Haar cascade for {filename}, using original image")
+                    classification_image = frame
+                    
+            except Exception as e:
+                # 如果Haar检测出错，也使用原图
+                print(f"Haar detection error for {filename}: {e}")
+                print(f"Using original image for {filename}")
+                classification_image = frame
+
             # --- 所有耗时操作都在这里执行 ---
             # 1) 尺寸检查 (如果需要)
             # ...
 
             # 2) 检测 A4
-            a4 = detect_a4_and_extract(frame)
-            if a4 is None:
-                client.publish("Group2/IMAGE/predict", json.dumps({"filename": filename, "error": "No A4 detected"}))
-                continue # 继续处理下一个任务
+            # a4 = detect_a4_and_extract(frame)
+            # if a4 is None:
+            #     # 没检测到A4，使用原始图像
+            #     print(f"No A4 detected for {filename}, using original image")
+            #     classification_image = frame
+            #     bbox = None
+            # else:
+            #     # 3) 检测猫ROI
+            #     bbox, cat_roi = find_cat_photo(a4)
+            #     if bbox is None or cat_roi is None:
+            #         # 没检测到猫ROI，使用A4图像
+            #         print(f"No cat ROI detected for {filename}, using A4 image")
+            #         classification_image = a4
+            #         bbox = None
+            #     else:
+            #         # 检测到猫ROI，使用ROI
+            #         print(f"Cat ROI detected for {filename}")
+            #         classification_image = cat_roi
 
-            # 3) 检测猫ROI
-            bbox, cat_roi = find_cat_photo(a4)
-            if bbox is None:
-                client.publish("Group2/IMAGE/predict", json.dumps({"filename": filename, "error": "No valid cat photo found"}))
-                continue
-
-            # 4) 预处理和分类
-            prep = preprocess_for_cnn(cat_roi)
+            # 4) 预处理和分类（总是执行）
+            prep = preprocess_for_cnn(classification_image)
             classification = classify_cat(filename, prep)
 
             # 5) 发布结果
-            client.publish("Group2/IMAGE/predict", json.dumps(classification))
+            client.publish("Group2/IMAGE/predict_result", json.dumps(classification))
             print("Published classification result:", classification)
+
+            # 6) 在终端打印结果
+            print(f"✅ Classification Result for {filename}:")
+            if "error" in classification:
+                print(f"   Error: {classification['error']}")
+            else:
+                # 根据你的实际数据结构调整
+                for key, value in classification.items():
+                    if key != "filename":  # 避免重复打印filename
+                        print(f"   {key}: {value}")
+            print("-" * 50)
 
         except Exception as e:
             print(f"An error occurred in worker thread: {e}")
+            # 可选：发布错误结果
+            try:
+                error_result = {
+                    "filename": filename if 'filename' in locals() else "unknown",
+                    "error": str(e)
+                }
+                client.publish("Group2/IMAGE/predict_result", json.dumps(error_result))
+            except:
+                pass
+        finally:
+            # 标记任务完成
+            try:
+                task_queue.task_done()
+            except:
+                pass
 
 
 def setup(hostname):
@@ -102,7 +175,7 @@ def setup(hostname):
 def main():
     global model
     print("Loading model from file:", FILENAME)
-    model = load_model(FILENAME)
+    model = tf_keras.models.load_model(FILENAME)             #模型是用tf_keras训练的也必须用tf_keras加载
     print("Model loaded successfully")
 
     client = setup("127.0.0.1")
