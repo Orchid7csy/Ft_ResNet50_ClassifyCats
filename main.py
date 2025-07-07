@@ -10,6 +10,7 @@ from tensorflow.keras.applications.resnet50 import preprocess_input
 import re
 import cv2
 import os
+from image_preprocessing import letterbox_preprocess
 
 # 导入find_real_img模块中的Haar检测函数
 from find_real_img import find_cat_with_haar
@@ -81,22 +82,20 @@ def load_image_with_haar(image_fname):
         img = Image.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
         detection_status = "Detection error, using original"
     
-    # 3) 调整大小到 224x224（模型输入要求）
-    try:
-        resample = Image.Resampling.LANCZOS
-    except AttributeError:
-        # Pillow < 9.1.0
-        resample = Image.LANCZOS
-        
-    img = img.resize((224, 224), resample)
- 
-    # 4) 转为 numpy 数组并扩展维度
-    img_array = np.array(img, dtype=np.float32)
+    # 3) 使用letterboxing调整到目标尺寸（与训练时一致）
+    # 先转换PIL图片到numpy数组（RGB格式）
+    img_array = np.array(img)
+
+    # 应用letterboxing预处理
+    img_processed = letterbox_preprocess(img_array, (224, 224))
+
+    # 4) 转为numpy数组并扩展维度
+    img_array = np.array(img_processed, dtype=np.float32)
     img_array = np.expand_dims(img_array, axis=0)  # 形状 (1,224,224,3)
-    
+
     # 5) 调用 ResNet50 的预处理
     img_array = preprocess_input(img_array)
-    
+
     return img_array, detection_status
 
 # Original load image function for comparison

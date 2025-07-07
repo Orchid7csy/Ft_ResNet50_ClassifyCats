@@ -8,8 +8,7 @@ import cv2
 import queue # <-- 引入队列模块
 import threading # <-- 引入线程模块
 import time
-
-# (请确保 find_real_img.py 在同一目录下)
+from image_preprocessing import letterbox_preprocess
 from find_real_img import preprocess_for_cnn, classes, find_cat_with_haar
 
 # --- 全局常量 ---
@@ -55,6 +54,12 @@ def on_message(client, userdata, msg):
             print("Failed to decode image")
             return
             
+        # 转换BGR到RGB（与训练时一致）
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # 应用letterboxing预处理（假设target_size是(224, 224)）
+        frame = letterbox_preprocess(frame, (224, 224))
+            
         # 生成文件名（或从topic中提取）
         filename = f"received_image_{int(time.time())}.jpg"
         
@@ -82,17 +87,27 @@ def worker(client):
             try:
                 cat_faces = find_cat_with_haar(frame)
                 
-                # 检查返回值是否有效
-                if cat_faces is not None and len(cat_faces) > 0:
-                    # 检测到猫脸，使用第一个检测到的猫脸区域
+                # 更严格的检查：确保返回值有效且第一个元素不是None
+                if (cat_faces is not None and 
+                    len(cat_faces) > 0 and 
+                    cat_faces[0] is not None and 
+                    len(cat_faces[0]) == 4):  # 确保是四元组
+                    
+                    # 检测到有效的猫脸，使用第一个检测到的猫脸区域
                     print(f"Haar detection successful for {filename}, found {len(cat_faces)} cat face(s)")
                     x, y, w, h = cat_faces[0]  # 使用第一个检测到的猫脸
-                    cat_face_roi = frame[y:y+h, x:x+w]  # 提取猫脸区域
-                    classification_image = cat_face_roi
-                    print(f"Using detected cat face region: x={x}, y={y}, w={w}, h={h}")
+                    
+                    # 验证坐标值的有效性
+                    if x >= 0 and y >= 0 and w > 0 and h > 0:
+                        cat_face_roi = frame[y:y+h, x:x+w]  # 提取猫脸区域
+                        classification_image = cat_face_roi
+                        print(f"Using detected cat face region: x={x}, y={y}, w={w}, h={h}")
+                    else:
+                        print(f"Invalid coordinates detected for {filename}, using original image")
+                        classification_image = frame
                 else:
-                    # 没有检测到猫脸，使用原图
-                    print(f"No cat face detected with Haar cascade for {filename}, using original image")
+                    # 没有检测到有效的猫脸，使用原图
+                    print(f"No valid cat face detected with Haar cascade for {filename}, using original image")
                     classification_image = frame
                     
             except Exception as e:
@@ -101,7 +116,6 @@ def worker(client):
                 print(f"Using original image for {filename}")
                 classification_image = frame
 
-            # --- 所有耗时操作都在这里执行 ---
             # 1) 尺寸检查 (如果需要)
             # ...
 

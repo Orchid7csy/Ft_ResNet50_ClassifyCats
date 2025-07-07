@@ -139,7 +139,8 @@ def find_cat_with_haar(a4_img):
         scaleFactor=1.05,   # 更细致的尺度缩放
         minNeighbors=5,     # 更严格的邻域验证
         minSize=(80, 80),   # 只检测较大猫脸
-        maxSize=(300, 300)  # 限制最大尺寸
+        # maxSize=(300, 300)  # 限制最大尺寸
+        # flags=cv2.CASCADE_SCALE_IMAGE  # 可选：优化检测性能
     )
     
     if len(cats) > 0:

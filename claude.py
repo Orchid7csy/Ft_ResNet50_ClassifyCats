@@ -13,6 +13,8 @@ from tensorflow.keras.regularizers import l2
 import matplotlib.pyplot as plt
 import tf_keras
 import cv2
+from image_preprocessing import letterbox_preprocess  # 确保导入letterbox预处理函数
+
 
 # 设置随机种子确保可重复性
 tf.random.set_seed(42)
@@ -33,35 +35,35 @@ print(f"数据目录: {base_dir}")
 print(f"批次大小: {batch_size}")
 print(f"图像尺寸: {img_size}")
 
-# 自定义预处理函数 - 使用letterboxing
-def letterbox_preprocess(image, target_size=(224, 224)):
-    """
-    使用letterboxing保持长宽比，然后应用ResNet50预处理
-    """
-    if len(image.shape) == 3:
-        h, w, _ = image.shape
-    else:
-        h, w = image.shape
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+# # 自定义预处理函数 - 使用letterboxing
+# def letterbox_preprocess(image, target_size=(224, 224)):
+#     """
+#     使用letterboxing保持长宽比，然后应用ResNet50预处理
+#     """
+#     if len(image.shape) == 3:
+#         h, w, _ = image.shape
+#     else:
+#         h, w = image.shape
+#         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
     
-    target_h, target_w = target_size
+#     target_h, target_w = target_size
     
-    # 计算缩放比例
-    scale = min(target_w / w, target_h / h)
-    new_w, new_h = int(w * scale), int(h * scale)
+#     # 计算缩放比例
+#     scale = min(target_w / w, target_h / h)
+#     new_w, new_h = int(w * scale), int(h * scale)
     
-    # 保持长宽比缩放
-    resized_img = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+#     # 保持长宽比缩放
+#     resized_img = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
     
-    # 创建灰色画布
-    canvas = np.full((target_h, target_w, 3), 128, dtype=np.uint8)
+#     # 创建灰色画布
+#     canvas = np.full((target_h, target_w, 3), 128, dtype=np.uint8)
     
-    # 居中粘贴
-    pad_x = (target_w - new_w) // 2
-    pad_y = (target_h - new_h) // 2
-    canvas[pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized_img
+#     # 居中粘贴
+#     pad_x = (target_w - new_w) // 2
+#     pad_y = (target_h - new_h) // 2
+#     canvas[pad_y:pad_y+new_h, pad_x:pad_x+new_w] = resized_img
     
-    return canvas
+#     return canvas
 
 class LetterboxDataGenerator(tf.keras.utils.Sequence):
     def __init__(self, directory, target_size, batch_size, class_mode='categorical', 
@@ -265,7 +267,7 @@ x = GlobalAveragePooling2D()(x)
 # 简化的全连接层
 x = Dense(512, activation='relu')(x)
 x = BatchNormalization()(x)
-x = Dropout(0.5)(x)
+x = Dropout(0.7)(x)
 
 x = Dense(128, activation='relu')(x)
 x = BatchNormalization()(x)
